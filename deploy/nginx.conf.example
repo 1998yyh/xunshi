@@ -1,0 +1,8 @@
+# 当前部署复用主站 80 端口，无需另建 server 块。
+# 将 nginx.locations.conf 安装到 /etc/nginx/conf.d/xunshi-locations.inc，
+# 在 /etc/nginx/conf.d/tuanzii-80.conf 的 server 块加入：
+#
+#     include /etc/nginx/conf.d/xunshi-locations.inc;
+#
+# 先执行 nginx -t，通过后再执行 systemctl reload nginx。
+# /var/www/xunshi 为 activate.sh 维护的版本符号链接。
