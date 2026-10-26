@@ -50,24 +50,26 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
         <span>S 信号触发</span><strong>{{ pool.state.loading || pool.state.error ? '—' : pool.triggered.value }}<small>只</small></strong><small>已触发的股票会优先展示</small>
       </div>
     </div>
-    <div
-      v-if="pool.state.error"
-      class="notice error"
-      role="alert"
-    >
-      {{ pool.state.error }}<button
-        class="text-button"
-        @click="pool.load"
+    <div class="watchlist-feedback">
+      <div
+        v-if="pool.state.error"
+        class="notice error"
+        role="alert"
       >
-        重新加载
-      </button>
-    </div>
-    <div
-      v-if="pool.state.message"
-      class="notice success"
-      role="status"
-    >
-      {{ pool.state.message }}
+        {{ pool.state.error }}<button
+          class="text-button"
+          @click="pool.load"
+        >
+          重新加载
+        </button>
+      </div>
+      <div
+        v-else-if="pool.state.message"
+        class="notice success"
+        role="status"
+      >
+        {{ pool.state.message }}
+      </div>
     </div>
     <section class="panel">
       <div class="section-heading">
@@ -136,3 +138,25 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
     </section>
   </template>
 </template>
+
+<style scoped>
+.watchlist-feedback {
+  min-block-size: 48px;
+}
+
+.watchlist-feedback .notice {
+  min-block-size: 48px;
+  margin: 0;
+}
+
+.watchlist-feedback .text-button {
+  padding-block: 0;
+}
+
+@media (max-width: 800px) {
+  .watchlist-feedback,
+  .watchlist-feedback .notice {
+    min-block-size: 68px;
+  }
+}
+</style>

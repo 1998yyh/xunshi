@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { chromium } from 'playwright'
 const server = await createServer({ mode: process.env.TEST_DEPLOYMENT ? 'production' : 'test', server: { host: '127.0.0.1', port: 0, strictPort: true } })
-let browser, page
+let browser, page, releaseRemove
 try {
   await server.listen()
   const base = server.resolvedUrls.local[0]
@@ -17,6 +17,7 @@ try {
   const two = { code: '000001', market: 'sz', name: '测试乙' }
   const pools = { alice: [], bob: [] }
   let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false
+  let denyRemove = false, removeGate = null
   const seen = []
   const run = (status) => ({ id: 'test-run', queryDate: '2026-09-10', status, total: 2, checked: status === 'done' ? 2 : 1, found: 2, failedCodes: [], updatedAt: '2026-09-10T07:00:00Z' })
   const results = (date) => ({ date, items: date === '2026-09-09' ? [] : [one, two], found: date === '2026-09-09' ? 0 : 2, checked: 2, total: 2, failedCodes: [], scannedAt: '2026-09-10T07:00:00Z' })
@@ -61,6 +62,8 @@ try {
       return reply({ checked: pools[user].length, triggered: 1, items: pools[user] })
     }
     if (path.startsWith('/stock-watchlist/') && method === 'DELETE') {
+      if (removeGate) await removeGate
+      if (denyRemove) return reply({ message: '移除失败，请稍后重试' }, 503)
       pools[user] = pools[user].filter((item) => item.id !== path.split('/').at(-1)); return route.fulfill({ status: 204 })
     }
     throw new Error(`未定义的测试请求: ${method} ${path}`)
@@ -147,6 +150,65 @@ try {
   await page.getByRole('heading', { name: '你的观察池还是空的' }).waitFor()
   console.log('✓ 观察池增删、状态筛选、搜索、S 检查与手机布局')
 
+  // 比较实际布局，覆盖确认操作、提示切换及慢请求引起的跳动。
+  const watchlistLayout = () => page.evaluate(() => {
+    const rect = (element) => {
+      const { x, y, width, height } = element.getBoundingClientRect()
+      return { x: x + scrollX, y: y + scrollY, width, height }
+    }
+    return {
+      heading: rect(document.querySelector('.section-heading')),
+      toolbar: rect(document.querySelector('.watchlist-toolbar')),
+      cells: [...document.querySelectorAll('.watchlist-scroll th, .watchlist-scroll tbody tr:first-child td')].filter((element) => element.getClientRects().length).map(rect),
+    }
+  })
+  for (const width of [1440, 390]) {
+    pools.alice = [one, two].map((item) => ({ ...item, id: item.code, entrySignalDate: '2026-09-10', status: 'watching', triggeredSignalDate: null }))
+    await page.setViewportSize({ width, height: 1050 })
+    await page.reload()
+    await page.getByRole('button', { name: '移除 测试甲', exact: true }).waitFor()
+    const initial = await watchlistLayout()
+    await page.getByRole('button', { name: '移除 测试甲', exact: true }).click()
+    assert.deepEqual(await watchlistLayout(), initial, `${width}px：展开确认不得改变列宽或行高`)
+    assert.equal(await page.getByRole('button', { name: '确认移除', exact: true }).count(), 1, '隐藏操作不能暴露到无障碍树')
+    await page.screenshot({ path: `results/watchlist-confirm-${width}.png`, fullPage: true })
+    await page.getByRole('button', { name: '移除 测试乙', exact: true }).click()
+    assert.deepEqual(await watchlistLayout(), initial, `${width}px：切换确认行时布局稳定`)
+    assert.equal(await page.getByRole('button', { name: '确认移除', exact: true }).count(), 1)
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    assert.deepEqual(await watchlistLayout(), initial, `${width}px：取消确认时布局稳定`)
+    assert.equal(pools.alice.length, 2)
+
+    denyRemove = true
+    await page.getByRole('button', { name: '移除 测试甲', exact: true }).click()
+    await page.getByRole('button', { name: '确认移除', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: '移除失败，请稍后重试' }).waitFor()
+    assert.deepEqual(await watchlistLayout(), initial, `${width}px：错误提示不得推移列表`)
+    assert.equal(pools.alice.length, 2, '失败时保留原数据')
+
+    denyRemove = false
+    removeGate = new Promise((resolve) => { releaseRemove = resolve })
+    await page.getByRole('button', { name: '移除 测试甲', exact: true }).click()
+    await page.getByRole('button', { name: '确认移除', exact: true }).click()
+    await page.getByRole('button', { name: '处理中…', exact: true }).waitFor()
+    assert.deepEqual(await watchlistLayout(), initial, `${width}px：请求等待期间布局稳定`)
+    assert.equal(await page.getByRole('button', { name: '移除 测试甲', exact: true }).isDisabled(), true)
+    releaseRemove()
+    removeGate = null
+    await page.getByRole('status').filter({ hasText: '已从观察池移除' }).waitFor()
+    assert.equal(await page.getByRole('button', { name: '移除 测试甲', exact: true }).count(), 0)
+    assert.equal(pools.alice.length, 1)
+    const afterRemoval = await watchlistLayout()
+    assert.deepEqual(afterRemoval.heading, initial.heading, `${width}px：移除后清单标题位置稳定`)
+    assert.deepEqual(afterRemoval.toolbar, initial.toolbar, `${width}px：移除后筛选栏位置稳定`)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+
+    await page.getByRole('button', { name: '移除 测试乙', exact: true }).click()
+    await page.getByRole('button', { name: '确认移除', exact: true }).click()
+    await page.getByRole('heading', { name: '你的观察池还是空的' }).waitFor()
+  }
+  console.log('✓ 桌面与手机移除确认、取消、切换行、失败、慢请求、成功及末项空态的布局回归')
+
   // 在退出前保留一条私人记录，切换账号后不得显示前一账户内容。
   pools.alice = [{ ...one, id: 'private-alice', entrySignalDate: '2026-09-10', status: 'watching', triggeredSignalDate: null }]
   await page.reload()
@@ -188,4 +250,4 @@ try {
   await mkdir('results', { recursive: true })
   if (page) { await page.screenshot({ path: 'results/failure.png', fullPage: true }); console.error(await page.locator('main').innerText()) }
   throw error
-} finally { await browser?.close(); await server.close() }
+} finally { releaseRemove?.(); await browser?.close(); await server.close() }

@@ -42,25 +42,27 @@ function confirm(id: string) { confirming.value = ''; emit('remove', id) }
           >
             {{ item.triggeredSignalDate || '—' }}
           </td><td class="align-right">
-            <span
-              v-if="confirming === item.id"
-              class="confirm-actions"
-            ><button
-              class="text-button danger-text"
-              :disabled="busy"
-              @click="confirm(item.id)"
-            >确认移除</button><button
-              class="text-button muted"
-              @click="confirming = ''"
-            >取消</button></span><button
-              v-else
-              class="text-button"
-              :disabled="busy"
-              :aria-label="`移除 ${item.name || item.code}`"
-              @click="confirming = item.id"
-            >
-              移除
-            </button>
+            <div class="row-actions">
+              <span
+                class="confirm-actions"
+                :class="{ 'actions-hidden': confirming !== item.id }"
+              ><button
+                class="text-button danger-text"
+                :disabled="busy"
+                @click="confirm(item.id)"
+              >确认移除</button><button
+                class="text-button muted"
+                @click="confirming = ''"
+              >取消</button></span><button
+                class="text-button"
+                :class="{ 'actions-hidden': confirming === item.id }"
+                :disabled="busy"
+                :aria-label="`移除 ${item.name || item.code}`"
+                @click="confirming = item.id"
+              >
+                移除
+              </button>
+            </div>
           </td>
         </tr>
       </tbody>
@@ -72,3 +74,30 @@ function confirm(id: string) { confirming.value = ''; emit('remove', id) }
     description="调整搜索内容或切换状态筛选。"
   />
 </template>
+
+<style scoped>
+.row-actions {
+  display: inline-grid;
+  align-items: center;
+  justify-items: end;
+}
+
+.row-actions > * {
+  grid-area: 1 / 1;
+}
+
+/* 两种操作共享占位，切换时保留较宽一组的尺寸。 */
+.actions-hidden {
+  visibility: hidden;
+}
+
+@media (max-width: 800px) {
+  .stock-name {
+    line-height: 1.4;
+  }
+
+  .stock-code {
+    line-height: 1.2;
+  }
+}
+</style>
