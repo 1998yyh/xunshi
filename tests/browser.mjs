@@ -18,6 +18,7 @@ try {
   const pools = { alice: [], bob: [] }
   let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false
   let denyRemove = false, removeGate = null
+  let failWatchlistCheck = false
   let denySectors = false
   let manyRows = null
   const sectorRequests = []
@@ -76,8 +77,11 @@ try {
       pools[user] = added; return reply({ items: added, added: added.map((item) => item.code), duplicated: [], invalid: [], overflow: [] })
     }
     if (path === '/stock-watchlist/check') {
-      pools[user] = pools[user].map((item, index) => index === 0 ? { ...item, status: 'triggered', triggeredSignalDate: '2026-09-11' } : item)
-      return reply({ checked: pools[user].length, triggered: 1, items: pools[user] })
+      const watching = pools[user].filter((item) => item.status === 'watching')
+      if (failWatchlistCheck) return reply({ checked: 0, triggered: 0, failed: watching.map((item) => `${item.market.toUpperCase()}${item.code}`), items: pools[user] })
+      const triggered = watching.filter((item) => [one.code, '600396'].includes(item.code)).length
+      pools[user] = pools[user].map((item) => item.status === 'watching' && [one.code, '600396'].includes(item.code) ? { ...item, status: 'triggered', triggeredSignalDate: item.code === '600396' ? '2026-09-15' : '2026-09-11' } : item)
+      return reply({ checked: watching.length, triggered, failed: [], items: pools[user] })
     }
     if (path.startsWith('/stock-watchlist/') && method === 'DELETE') {
       if (removeGate) await removeGate
@@ -252,6 +256,24 @@ try {
     await page.getByRole('heading', { name: '你的观察池还是空的' }).waitFor()
   }
   console.log('✓ 桌面与手机移除确认、取消、切换行、失败、慢请求、成功及末项空态的布局回归')
+
+  pools.alice = [{ code: '600396', market: 'sh', name: '华电辽能' }, two].map((item) => ({ ...item, id: item.code, entrySignalDate: '2026-09-10', status: 'watching', triggeredSignalDate: null }))
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  await page.reload()
+  await page.getByRole('button', { name: '移除 华电辽能', exact: true }).waitFor()
+  failWatchlistCheck = true
+  await page.getByRole('button', { name: '立即检查', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '检查未完成：2 只历史信号读取失败，请重试' }).waitFor()
+  assert.equal(pools.alice.filter((item) => item.status === 'triggered').length, 0)
+  failWatchlistCheck = false
+  await page.getByRole('button', { name: '立即检查', exact: true }).click()
+  await page.getByRole('cell', { name: '2026-09-15', exact: true }).waitFor()
+  await page.getByRole('status').filter({ hasText: '新增 1 只 S，池内已触发 1 只' }).waitFor()
+  await page.getByRole('button', { name: '立即检查', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '新增 0 只 S，池内已触发 1 只' }).waitFor()
+  assert.equal(await page.getByRole('cell', { name: '2026-09-15', exact: true }).count(), 1)
+  await page.screenshot({ path: 'results/watchlist-history-desktop.png', fullPage: true })
+  console.log('✓ 历史检查失败提示、旧日期 S 展示及新增数量与已触发数量区分')
 
   // 在退出前保留一条私人记录，切换账号后不得显示前一账户内容。
   pools.alice = [{ ...one, id: 'private-alice', entrySignalDate: '2026-09-10', status: 'watching', triggeredSignalDate: null }]

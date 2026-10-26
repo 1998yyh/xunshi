@@ -7,6 +7,7 @@ export interface ScanRun { id: string; queryDate: string; status: ScanStatus; to
 export interface ScanResponse { cached?: boolean; run?: ScanRun; result?: { date: string; items: Stock[]; requested: number; fetchedCount: number; cachedCount: number; failed: string[]; invalid: string[] } }
 export interface HistoryDate { date: string; found: number; checked: number; total: number; scannedAt: string }
 export interface WatchItem extends Stock { id: string; entrySignalDate: string; status: 'watching' | 'triggered'; triggeredSignalDate: string | null; createdAt: string }
-export interface AddResponse { items: WatchItem[]; added: string[]; invalid: string[]; duplicated: string[]; overflow: string[] }
+export interface AddResponse { items: WatchItem[]; added: string[]; invalid: string[]; duplicated: string[]; overflow: string[]; checkFailed?: string[] }
+export interface WatchlistCheckResponse { checked: number; triggered: number; failed?: string[]; items: WatchItem[] }
 export interface User { id: string; username: string; email: string; role: 'admin' | 'user' }
 export interface Tokens { accessToken: string; refreshToken: string }

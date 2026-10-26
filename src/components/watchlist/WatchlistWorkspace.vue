@@ -73,7 +73,7 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
     </div>
     <section class="panel">
       <div class="section-heading">
-        <div><h2>我的观察清单</h2><p>交易日 10:00 与 14:50 由服务端自动检查。</p></div><button
+        <div><h2>我的观察清单</h2><p>检查覆盖入池信号日之后的历史 S；交易日 10:00 与 14:50 自动检查。</p></div><button
           class="button secondary compact"
           :disabled="pool.state.busy || pool.state.loading || !pool.state.items.length"
           @click="pool.check"

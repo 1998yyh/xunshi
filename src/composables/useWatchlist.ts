@@ -52,6 +52,7 @@ export function useWatchlist() {
       if (result.duplicated.length) notes.push(`${result.duplicated.length} 只已在池中`)
       if (result.invalid.length) notes.push(`${result.invalid.length} 只不符合规则`)
       if (result.overflow.length) notes.push(`${result.overflow.length} 只超出容量`)
+      if (result.checkFailed?.length) notes.push(`${result.checkFailed.length} 只历史信号未能核对，请稍后检查`)
       return { items: result.items, message: notes.join('；') }
     }),
     remove: (id: string) => mutate(async () => {
@@ -60,7 +61,10 @@ export function useWatchlist() {
     }),
     check: () => mutate(async () => {
       const result = await stockApi.check()
-      return { items: result.items, message: `检查完成：已检查 ${result.checked} 只，新增 ${result.triggered} 只 S 信号` }
+      const confirmed = result.items.filter((item) => item.status === 'triggered').length
+      const failed = result.failed?.length ?? 0
+      const summary = failed ? `检查未完成：${failed} 只历史信号读取失败，请重试` : `检查完成：已核对 ${result.checked} 只历史信号`
+      return { items: result.items, message: `${summary}；新增 ${result.triggered} 只 S，池内已触发 ${confirmed} 只` }
     }),
   }
 }

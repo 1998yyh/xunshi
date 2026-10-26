@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { AddResponse, HistoryDate, ScanResponse, ScanRun, Signals, Stock, StockSectors, WatchItem } from '../types'
+import type { AddResponse, HistoryDate, ScanResponse, ScanRun, Signals, Stock, StockSectors, WatchItem, WatchlistCheckResponse } from '../types'
 export const stockApi = {
   sectors: (codes: string[], signal?: AbortSignal) => request<{ items: StockSectors[] }>(`/stock-signals/sectors?codes=${encodeURIComponent(codes.join(','))}`, { signal }),
   history: (signal?: AbortSignal) => request<HistoryDate[]>('/stock-signals/dates', { signal }),
@@ -9,5 +9,5 @@ export const stockApi = {
   watchlist: (signal?: AbortSignal) => request<{ items: WatchItem[] }>('/stock-watchlist', { signal }),
   add: (items: (Stock & { entrySignalDate: string })[]) => request<AddResponse>('/stock-watchlist', { method: 'POST', body: { items } }),
   remove: (id: string) => request<void>(`/stock-watchlist/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  check: () => request<{ checked: number; triggered: number; items: WatchItem[] }>('/stock-watchlist/check', { method: 'POST' }),
+  check: () => request<WatchlistCheckResponse>('/stock-watchlist/check', { method: 'POST' }),
 }
