@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { chromium } from 'playwright'
 const server = await createServer({ mode: process.env.TEST_DEPLOYMENT ? 'production' : 'test', server: { host: '127.0.0.1', port: 0, strictPort: true } })
-let browser, page, releaseRemove
+let browser, page, releaseRemove, releaseSectors
 try {
   await server.listen()
   const base = server.resolvedUrls.local[0]
@@ -18,9 +18,18 @@ try {
   const pools = { alice: [], bob: [] }
   let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false
   let denyRemove = false, removeGate = null
+  let denySectors = false
+  let manyRows = null
+  const sectorRequests = []
+  let onSectorRequest = () => {}
+  let sectorGate = new Promise((resolve) => { releaseSectors = resolve })
+  const sectorData = [
+    { code: one.code, industries: [{ code: 'BK0438', name: '食品饮料', level: 1 }, { code: 'BK0896', name: '白酒', level: 2 }], concepts: ['超级品牌', '电商概念', '乡村振兴', '央国企改革', '西部大开发'].map((name, index) => ({ code: `BK${index}`, name })), status: 'ready', source: 'eastmoney', fetchedAt: '2026-10-26T10:00:00Z' },
+    { code: two.code, industries: [{ code: 'BK0475', name: '银行', level: 1 }], concepts: [], status: 'ready', source: 'eastmoney', fetchedAt: '2026-10-26T10:00:00Z' },
+  ]
   const seen = []
   const run = (status) => ({ id: 'test-run', queryDate: '2026-09-10', status, total: 2, checked: status === 'done' ? 2 : 1, found: 2, failedCodes: [], updatedAt: '2026-09-10T07:00:00Z' })
-  const results = (date) => ({ date, items: date === '2026-09-09' ? [] : [one, two], found: date === '2026-09-09' ? 0 : 2, checked: 2, total: 2, failedCodes: [], scannedAt: '2026-09-10T07:00:00Z' })
+  const results = (date) => ({ date, items: date === '2026-09-09' ? [] : manyRows ?? [one, two], found: date === '2026-09-09' ? 0 : manyRows?.length ?? 2, checked: manyRows?.length ?? 2, total: manyRows?.length ?? 2, failedCodes: [], scannedAt: '2026-09-10T07:00:00Z' })
   await page.route('**/api/**', async (route) => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname.replace(/^\/(?:xunshi\/)?api/, ''), method = req.method()
     const user = req.headers().authorization?.includes('bob') ? 'bob' : 'alice'
@@ -36,6 +45,15 @@ try {
     if (expire && !req.headers().authorization?.startsWith('Bearer renewed-')) return reply({ message: 'access expired' }, 401)
     if (path === '/auth/profile') return reply({ id: user, username: user, email: `${user}@test.invalid`, role: 'user' })
     if (path === '/stock-signals/dates') return reply([{ date: '2026-09-10', found: 2 }, { date: '2026-09-09', found: 0 }])
+    if (path === '/stock-signals/sectors') {
+      const codes = url.searchParams.get('codes').split(',')
+      sectorRequests.push(codes)
+      onSectorRequest()
+      const denied = denySectors
+      if (sectorGate) await sectorGate
+      if (denied) return reply({ message: '板块来源暂不可用' }, 503)
+      return reply({ items: sectorData.filter((item) => codes.includes(item.code)) })
+    }
     if (path === '/stock-signals') {
       const date = url.searchParams.get('date'); seen.push(date)
       if (date === '2026-09-08') await new Promise((resolve) => setTimeout(resolve, 300))
@@ -76,6 +94,32 @@ try {
   await mkdir('results', { recursive: true })
   await page.goto(base)
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
+  assert.deepEqual(await page.getByRole('columnheader').allTextContents(), ['股票', '行业板块', '概念板块', '观察状态'])
+  assert.ok(await page.getByRole('cell', { name: '加载中…', exact: true }).count() > 0, '板块加载不阻塞股票结果')
+  releaseSectors()
+  sectorGate = null
+  await page.getByRole('cell', { name: '食品饮料 / 白酒', exact: true }).waitFor()
+  await page.getByRole('cell', { name: '暂无主题概念', exact: true }).waitFor()
+  assert.equal(await page.getByText('西部大开发', { exact: true }).count(), 0)
+  await page.getByRole('button', { name: '展开 测试甲 的概念板块', exact: true }).click()
+  await page.getByText('西部大开发', { exact: true }).waitFor()
+  await page.screenshot({ path: 'results/sectors-expanded-desktop.png', fullPage: true })
+  await page.getByRole('button', { name: '收起 测试甲 的概念板块', exact: true }).click()
+  denySectors = true
+  await page.reload()
+  await page.getByRole('button', { name: '重试板块查询', exact: true }).waitFor()
+  assert.equal(await page.getByRole('cell', { name: '暂不可用', exact: true }).count(), 4)
+  assert.equal(await page.getByRole('cell', { name: /测试甲.*600519/ }).count(), 1)
+  denySectors = false
+  await page.getByRole('button', { name: '重试板块查询', exact: true }).click()
+  await page.getByRole('cell', { name: '食品饮料 / 白酒', exact: true }).waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '展开 测试甲 的概念板块', exact: true }).click()
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  await page.screenshot({ path: 'results/sectors-expanded-mobile.png', fullPage: true })
+  await page.getByRole('button', { name: '收起 测试甲 的概念板块', exact: true }).click()
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  console.log('✓ 行业层级、概念展开、空概念、非阻塞加载、接口失败降级及重试')
   assert.equal(await page.getByLabel('信号日期').inputValue(), '2026-09-10', '默认选择最新缓存日期')
   assert.equal(await page.locator('nav a').count(), 2)
   await page.getByRole('button', { name: '登录并扫描', exact: true }).click()
@@ -244,10 +288,33 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
   await page.screenshot({ path: 'results/signals-mobile.png', fullPage: true })
+  manyRows = Array.from({ length: 60 }, (_, index) => ({ code: String(600000 + index), market: 'sh', name: `批量股票${index}` }))
+  sectorData.push(...manyRows.map((item) => ({ ...sectorData[0], code: item.code })))
+  const beforeBatches = sectorRequests.length
+  await page.goto(`${base}signals?date=2026-09-10`)
+  await page.waitForFunction(() => [...document.querySelectorAll('.industry-cell')].filter((cell) => cell.textContent.trim() === '食品饮料 / 白酒').length === 60)
+  assert.equal(sectorRequests.length - beforeBatches, 3, '60 只股票分三批查询')
+  assert.ok(sectorRequests.slice(beforeBatches).every((codes) => codes.length <= 25))
+
+  sectorGate = new Promise((resolve) => { releaseSectors = resolve })
+  const beforeCancel = sectorRequests.length
+  const twoStarted = new Promise((resolve) => { onSectorRequest = () => { if (sectorRequests.length === beforeCancel + 2) resolve() } })
+  await page.reload()
+  await twoStarted
+  assert.equal(sectorRequests.length - beforeCancel, 2, '最多并发两个板块请求')
+  await page.getByLabel('信号日期').fill('2026-09-09')
+  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
+  releaseSectors()
+  sectorGate = null
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  assert.equal(sectorRequests.length - beforeCancel, 2, '日期切换后不再发送旧批次')
+  assert.equal(await page.locator('.signals-scroll').count(), 0, '迟到板块响应不能恢复旧股票')
+  console.log('✓ 板块分批、并发限制与切换日期取消旧请求')
   assert.deepEqual(errors, [])
   console.log('✓ 扫描失败、空态、窄屏筛选页与运行时检查')
 } catch (error) {
   await mkdir('results', { recursive: true })
   if (page) { await page.screenshot({ path: 'results/failure.png', fullPage: true }); console.error(await page.locator('main').innerText()) }
   throw error
-} finally { releaseRemove?.(); await browser?.close(); await server.close() }
+} finally { releaseRemove?.(); releaseSectors?.(); await browser?.close(); await server.close() }

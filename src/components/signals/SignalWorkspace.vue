@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import { useSignals } from '../../composables/useSignals'
 import { useWatchlist } from '../../composables/useWatchlist'
 import { useAuth } from '../../composables/useAuth'
+import { useStockSectors } from '../../composables/useStockSectors'
 import { formatTime } from '../../lib/domain'
 import PageHeader from '../ui/PageHeader.vue'
 import EmptyState from '../ui/EmptyState.vue'
@@ -11,6 +12,7 @@ import SignalTable from './SignalTable.vue'
 const auth = useAuth()
 const pool = useWatchlist()
 const { today, date, mode, codesText, history, historyError, result, run, loading, scanning, unscanned, error, notices, selected, copyMessage, rows, selectDate, start, copy, loadHistory } = useSignals()
+const { sectors, failed: sectorsFailed, retry: retrySectors } = useStockSectors(rows)
 const chosen = computed(() => rows.value.filter((item) => selected.value.includes(item.code)))
 const progress = computed(() => run.value?.total ? Math.min(100, Math.round(run.value.checked / run.value.total * 100)) : 0)
 watch(pool.codes, (codes) => { selected.value = selected.value.filter((code) => !codes.has(code)) })
@@ -111,7 +113,20 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
             v-if="result"
             class="count-badge"
           >{{ rows.length }}</span>
-        </h2><p>{{ result ? `更新时间 ${formatTime(result.scannedAt)} · 来源：新浪财经` : '查询后展示当日 B 信号股票' }}</p>
+        </h2><p>{{ result ? `更新时间 ${formatTime(result.scannedAt)} · 信号来源：新浪财经` : '查询后展示当日 B 信号股票' }}</p>
+        <p
+          v-if="rows.length"
+          class="sector-source"
+        >
+          板块来源：东方财富 · 当前归属，非历史快照
+          <button
+            v-if="sectorsFailed"
+            class="text-button"
+            @click="retrySectors"
+          >
+            重试板块查询
+          </button>
+        </p>
       </div><div class="result-actions">
         <button
           v-if="rows.length"
@@ -147,7 +162,7 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
       v-else-if="rows.length && result"
       v-model="selected"
       :rows="rows"
-      :date="result.date"
+      :sectors="sectors"
       :authenticated="!!auth.state.user"
       :pooled="pool.codes.value"
       :busy="pool.state.busy"
@@ -206,3 +221,12 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
     </button>
   </section>
 </template>
+
+<style scoped>
+.sector-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+</style>
