@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NButton } from 'naive-ui'
 import { shallowRef } from 'vue'
 import type { WatchItem } from '../../types'
 import EmptyState from '../ui/EmptyState.vue'
@@ -46,14 +47,18 @@ function confirm(id: string) { confirming.value = ''; emit('remove', id) }
               <span
                 class="confirm-actions"
                 :class="{ 'actions-hidden': confirming !== item.id }"
-              ><button
+              ><NButton
+                text
+                type="error"
                 class="text-button danger-text"
                 :disabled="busy"
                 @click="confirm(item.id)"
-              >确认移除</button><button
+              >确认移除</NButton><NButton
+                text
                 class="text-button muted"
                 @click="confirming = ''"
-              >取消</button></span><button
+              >取消</NButton></span><NButton
+                text
                 class="text-button"
                 :class="{ 'actions-hidden': confirming === item.id }"
                 :disabled="busy"
@@ -61,7 +66,7 @@ function confirm(id: string) { confirming.value = ''; emit('remove', id) }
                 @click="confirming = item.id"
               >
                 移除
-              </button>
+              </NButton>
             </div>
           </td>
         </tr>

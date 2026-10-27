@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NButton } from 'naive-ui'
 import { computed, shallowRef } from 'vue'
 import type { StockSectors } from '../../types'
 const props = defineProps<{ value?: StockSectors; name: string }>()
@@ -37,15 +38,16 @@ const placeholder = computed(() => !props.value ? '加载中…' : props.value.s
         :key="concept.code"
         class="concept-tag"
       >{{ concept.name }}</span>
-      <button
+      <NButton
         v-if="concepts.length > 3"
+        text
         class="text-button"
         :aria-expanded="expanded"
         :aria-label="`${expanded ? '收起' : '展开'} ${name} 的概念板块`"
         @click="expanded = !expanded"
       >
         {{ expanded ? '收起' : `+${concepts.length - 3}` }}
-      </button>
+      </NButton>
     </div>
     <span
       v-else

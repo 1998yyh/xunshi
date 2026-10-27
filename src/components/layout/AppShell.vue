@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NButton } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../../composables/useAuth'
 import UiIcon from '../ui/UiIcon.vue'
@@ -34,12 +35,13 @@ function logout() { auth.logout(); void router.push('/signals') }
         <template v-if="auth.state.user">
           <span class="avatar">{{ auth.state.user.username.slice(0, 1).toUpperCase() }}</span><div class="account-name">
             <strong>{{ auth.state.user.username }}</strong><small>个人工作台</small>
-          </div><button
+          </div><NButton
+            text
             class="text-button"
             @click="logout"
           >
             退出
-          </button>
+          </NButton>
         </template>
         <template v-else>
           <span class="avatar">访</span><div class="account-name">

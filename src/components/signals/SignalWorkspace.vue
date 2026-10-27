@@ -9,6 +9,8 @@ import { formatTime } from '../../lib/domain'
 import PageHeader from '../ui/PageHeader.vue'
 import EmptyState from '../ui/EmptyState.vue'
 import ScanForm from './ScanForm.vue'
+import ScanHistory from './ScanHistory.vue'
+import { NButton, NProgress } from 'naive-ui'
 import SignalTable from './SignalTable.vue'
 const auth = useAuth()
 const pool = useWatchlist()
@@ -58,9 +60,12 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
     class="scan-progress"
     role="status"
   >
-    <div><strong>服务端扫描中</strong><span>{{ run ? `${run.checked} / ${run.total || '准备中'}` : '正在获取进度…' }}</span></div><progress
-      :value="progress"
-      max="100"
+    <div><strong>服务端扫描中</strong><span>{{ run ? `${run.checked} / ${run.total || '准备中'}` : '正在获取进度…' }}</span></div><NProgress
+      type="line"
+      :percentage="progress"
+      :show-indicator="false"
+      :height="6"
+      :processing="true"
     /><p>可以离开本页。当前任务链接可用于返回查看进度。</p>
   </div>
   <div
@@ -68,24 +73,26 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
     class="notice error"
     role="alert"
   >
-    {{ error }}<button
+    {{ error }}<NButton
+      text
       class="text-button"
       @click="selectDate(date)"
     >
       重新查询
-    </button>
+    </NButton>
   </div>
   <div
     v-if="pool.state.error && auth.state.user"
     class="notice error"
     role="alert"
   >
-    {{ pool.state.error }}<button
+    {{ pool.state.error }}<NButton
+      text
       class="text-button"
       @click="pool.load"
     >
       重试观察池查询
-    </button>
+    </NButton>
   </div>
   <div
     v-if="pool.state.message"
@@ -121,42 +128,45 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
           class="sector-source"
         >
           板块来源：东方财富 · 当前归属，非历史快照
-          <button
+          <NButton
             v-if="sectorsFailed"
+            text
             class="text-button"
             @click="retrySectors"
           >
             重试板块查询
-          </button>
+          </NButton>
         </p>
         <p
           v-if="rows.length"
           class="sector-source"
         >
           当日涨幅对应 {{ date }}；距今涨幅从该日收盘起算 · 东方财富优先，腾讯备用 / 前复权 · 每 30 秒更新
-          <button
+          <NButton
             v-if="performanceFailed"
+            text
             class="text-button"
             @click="retryPerformance"
           >
             重试涨幅查询
-          </button>
+          </NButton>
         </p>
       </div><div class="result-actions">
-        <button
+        <NButton
           v-if="rows.length"
-          class="button secondary compact"
+          size="small"
           @click="copy"
         >
           复制代码
-        </button><button
+        </NButton><NButton
           v-if="rows.length && auth.state.user"
-          class="button primary compact"
+          type="primary"
+          size="small"
           :disabled="!selected.length || pool.state.busy || scanning || loading"
           @click="add"
         >
           {{ pool.state.busy ? '处理中…' : `加入观察池${selected.length ? ` (${selected.length})` : ''}` }}
-        </button>
+        </NButton>
       </div>
     </div>
     <p
@@ -205,37 +215,15 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
       单次最多选择 100 只；观察池总容量为 100 只。
     </div>
   </section>
-  <section class="history-section">
-    <div><h2>历史扫描</h2><p>仅展示已完成的扫描日期</p></div><select
-      v-if="history.length"
-      aria-label="历史扫描日期"
-      :value="date"
-      :disabled="loading || scanning"
-      @change="selectDate(($event.target as HTMLSelectElement).value)"
-    >
-      <option
-        v-if="!history.some((item) => item.date === date)"
-        :value="date"
-      >
-        {{ date }} · 当前查询
-      </option><option
-        v-for="item in history"
-        :key="item.date"
-        :value="item.date"
-      >
-        {{ item.date }} · B {{ item.found }} 只
-      </option>
-    </select><span
-      v-else
-      class="muted"
-    >{{ historyError || '暂无历史扫描记录' }}</span><button
-      v-if="historyError"
-      class="text-button"
-      @click="loadHistory"
-    >
-      重试
-    </button>
-  </section>
+  <ScanHistory
+    :date="date"
+    :today="today"
+    :history="history"
+    :busy="loading || scanning"
+    :error="historyError"
+    @select="selectDate"
+    @retry="loadHistory"
+  />
 </template>
 
 <style scoped>

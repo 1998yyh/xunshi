@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { NButton, NInput } from 'naive-ui'
+import UiIcon from '../ui/UiIcon.vue'
 import { computed, shallowRef } from 'vue'
 import { useAuth } from '../../composables/useAuth'
 import { useWatchlist } from '../../composables/useWatchlist'
@@ -56,12 +58,13 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
         class="notice error"
         role="alert"
       >
-        {{ pool.state.error }}<button
+        {{ pool.state.error }}<NButton
+          text
           class="text-button"
           @click="pool.load"
         >
           重新加载
-        </button>
+        </NButton>
       </div>
       <div
         v-else-if="pool.state.message"
@@ -73,13 +76,13 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
     </div>
     <section class="panel">
       <div class="section-heading">
-        <div><h2>我的观察清单</h2><p>检查覆盖入池信号日之后的历史 S；交易日 10:00 与 14:50 自动检查。</p></div><button
-          class="button secondary compact"
+        <div><h2>我的观察清单</h2><p>检查覆盖入池信号日之后的历史 S；交易日 10:00 与 14:50 自动检查。</p></div><NButton
+          size="small"
           :disabled="pool.state.busy || pool.state.loading || !pool.state.items.length"
           @click="pool.check"
         >
           {{ pool.state.busy ? '处理中…' : '立即检查' }}
-        </button>
+        </NButton>
       </div>
       <div class="watchlist-toolbar">
         <div
@@ -87,28 +90,42 @@ const visible = computed(() => pool.state.items.filter((item) => (filter.value =
           role="group"
           aria-label="观察状态"
         >
-          <button
+          <NButton
+            quaternary
+            size="small"
             :aria-pressed="filter === 'all'"
             @click="filter = 'all'"
           >
             全部
-          </button><button
+          </NButton><NButton
+            quaternary
+            size="small"
             :aria-pressed="filter === 'watching'"
             @click="filter = 'watching'"
           >
             持续观察
-          </button><button
+          </NButton><NButton
+            quaternary
+            size="small"
             :aria-pressed="filter === 'triggered'"
             @click="filter = 'triggered'"
           >
             S 已触发
-          </button>
-        </div><input
-          v-model="search"
-          type="search"
-          aria-label="搜索观察池"
+          </NButton>
+        </div><NInput
+          v-model:value="search"
+          class="watchlist-search"
+          :input-props="{ type: 'search', 'aria-label': '搜索观察池' }"
+          clearable
           placeholder="搜索名称或代码"
         >
+          <template #prefix>
+            <UiIcon
+              name="search"
+              :size="16"
+            />
+          </template>
+        </NInput>
       </div>
       <div
         v-if="pool.state.loading"

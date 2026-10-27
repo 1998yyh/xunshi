@@ -11,6 +11,8 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1050 }, permissions: ['clipboard-read', 'clipboard-write'] })
   page = await context.newPage()
   page.setDefaultTimeout(10000)
+  // 固定上海业务日期，避免历史窗口随运行日期漂移。
+  await page.clock.install({ time: new Date('2026-09-10T04:00:00Z') })
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   const one = { code: '600519', market: 'sh', name: '测试甲' }
@@ -20,7 +22,7 @@ try {
   let denyRemove = false, removeGate = null
   let failWatchlistCheck = false
   let denySectors = false
-  let denyPerformance = false, performanceGate = null, pendingBaseline = false, useBackup = true
+  let denyPerformance = false, performanceGate = null, pendingBaseline = false, useBackup = true, swappedQuotes = false
   const performanceRequests = []
   let onPerformanceRequest = () => {}
   let manyRows = null
@@ -31,6 +33,8 @@ try {
     { code: one.code, industries: [{ code: 'BK0438', name: '食品饮料', level: 1 }, { code: 'BK0896', name: '白酒', level: 2 }], concepts: ['超级品牌', '电商概念', '乡村振兴', '央国企改革', '西部大开发'].map((name, index) => ({ code: `BK${index}`, name })), status: 'ready', source: 'eastmoney', fetchedAt: '2026-10-26T10:00:00Z' },
     { code: two.code, industries: [{ code: 'BK0475', name: '银行', level: 1 }], concepts: [], status: 'ready', source: 'eastmoney', fetchedAt: '2026-10-26T10:00:00Z' },
   ]
+  const defaultHistory = [{ date: '2026-09-10', found: 2 }, { date: '2026-09-09', found: 0 }, { date: '2026-08-12', found: 1 }, { date: '2026-08-11', found: 99 }]
+  let historyEntries = defaultHistory
   const seen = []
   const run = (status) => ({ id: 'test-run', queryDate: '2026-09-10', status, total: 2, checked: status === 'done' ? 2 : 1, found: 2, failedCodes: [], updatedAt: '2026-09-10T07:00:00Z' })
   const results = (date) => ({ date, items: date === '2026-09-09' ? [] : manyRows ?? [one, two], found: date === '2026-09-09' ? 0 : manyRows?.length ?? 2, checked: manyRows?.length ?? 2, total: manyRows?.length ?? 2, failedCodes: [], scannedAt: '2026-09-10T07:00:00Z' })
@@ -48,7 +52,7 @@ try {
     }
     if (expire && !req.headers().authorization?.startsWith('Bearer renewed-')) return reply({ message: 'access expired' }, 401)
     if (path === '/auth/profile') return reply({ id: user, username: user, email: `${user}@test.invalid`, role: 'user' })
-    if (path === '/stock-signals/dates') return reply([{ date: '2026-09-10', found: 2 }, { date: '2026-09-09', found: 0 }])
+    if (path === '/stock-signals/dates') return reply(historyEntries)
     if (path === '/stock-signals/performance') {
       const codes = url.searchParams.get('codes').split(','), date = url.searchParams.get('date')
       performanceRequests.push({ codes, date })
@@ -58,7 +62,7 @@ try {
       if (denied) return reply({ message: '行情来源暂不可用' }, 503)
       return reply({ items: codes.map((code, index) => ({ code, date,
         dayPercent: date === '2026-09-08' ? 2.5 : index % 2 === 0 ? 12.34 : 0,
-        sincePercent: pending ? null : index % 2 === 0 ? 56.78 : -3.21,
+        sincePercent: pending ? null : swappedQuotes ? index % 2 === 0 ? -8 : 9 : index % 2 === 0 ? 56.78 : -3.21,
         dayReason: null, sinceReason: pending ? '基准日未收盘' : null,
         quoteAsOf: '2026-10-27T02:00:00Z', source: useBackup && index % 2 === 1 ? 'tencent' : 'eastmoney', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
       })) })
@@ -112,6 +116,12 @@ try {
     await page.getByLabel('密码', { exact: true }).fill('integration-only')
     await page.getByRole('button', { name: '登录工作台', exact: true }).click()
   }
+  const rowCodes = () => page.locator('.signals-scroll .stock-code').allTextContents()
+  const chooseSort = async (label) => {
+    await page.locator('.result-sort-select').click()
+    await page.getByRole('option', { name: label, exact: true }).click()
+    await page.getByRole('listbox', { name: '结果排序', exact: true }).waitFor({ state: 'hidden' })
+  }
   await mkdir('results', { recursive: true })
   await page.goto(base)
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
@@ -125,9 +135,41 @@ try {
   await page.locator('.quote-source').filter({ hasText: '腾讯备用' }).waitFor()
   assert.deepEqual(await page.locator('.quote-source').allTextContents(), ['东方财富', '腾讯备用'], '逐只标出实际来源')
   assert.ok(await page.getByRole('cell', { name: '加载中…', exact: true }).count() > 0, '板块加载不阻塞股票结果')
+  await chooseSort('一级板块 · 拼音降序')
+  assert.deepEqual(await rowCodes(), [one.code, two.code], '板块加载中保持原顺序')
   releaseSectors()
   sectorGate = null
   await page.getByRole('cell', { name: '食品饮料 / 白酒', exact: true }).waitFor()
+  assert.deepEqual(await rowCodes(), [two.code, one.code], '板块补齐后自动应用排序')
+  await chooseSort('默认顺序')
+  const countsBeforeSort = [sectorRequests.length, performanceRequests.length, posts]
+  const dayHeader = page.getByRole('button', { name: '当日涨幅排序', exact: true })
+  await dayHeader.click()
+  assert.deepEqual(await rowCodes(), [one.code, two.code])
+  assert.equal(await page.locator('th').filter({ hasText: '当日涨幅' }).getAttribute('aria-sort'), 'descending')
+  await dayHeader.click()
+  assert.deepEqual(await rowCodes(), [two.code, one.code], '当日涨幅升序，真实零排在正数前')
+  await dayHeader.click()
+  assert.deepEqual(await rowCodes(), [one.code, two.code], '第三次点击恢复接口原顺序')
+  await page.getByRole('button', { name: '距今涨幅排序', exact: true }).click()
+  await page.getByRole('button', { name: '距今涨幅排序', exact: true }).click()
+  assert.deepEqual(await rowCodes(), [two.code, one.code], '距今涨幅按负数到正数排序')
+  await page.getByRole('button', { name: '行业板块排序', exact: true }).click()
+  assert.deepEqual(await rowCodes(), [one.code, two.code], '一级板块拼音升序')
+  await page.getByRole('button', { name: '行业板块排序', exact: true }).click()
+  assert.deepEqual(await rowCodes(), [two.code, one.code], '一级板块拼音降序')
+  await page.screenshot({ path: 'results/sorting-desktop.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await chooseSort('当日涨幅 · 高到低')
+  assert.deepEqual(await rowCodes(), [one.code, two.code], '手机端下拉排序与表头共用状态')
+  await chooseSort('距今涨幅 · 低到高')
+  assert.deepEqual(await rowCodes(), [two.code, one.code])
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  await page.screenshot({ path: 'results/sorting-mobile.png', fullPage: true })
+  await chooseSort('默认顺序')
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  assert.deepEqual([sectorRequests.length, performanceRequests.length, posts], countsBeforeSort, '排序不会重新查询板块、行情或创建扫描')
+  console.log('✓ 表头三态、涨幅正负与零、一级行业排序、延迟补齐、手机排序及无新增请求')
   await page.getByRole('cell', { name: '暂无主题概念', exact: true }).waitFor()
   assert.equal(await page.getByText('西部大开发', { exact: true }).count(), 0)
   await page.getByRole('button', { name: '展开 测试甲 的概念板块', exact: true }).click()
@@ -150,6 +192,57 @@ try {
   await page.setViewportSize({ width: 1440, height: 1050 })
   console.log('✓ 行业层级、概念展开、空概念、非阻塞加载、接口失败降级及重试')
   assert.equal(await page.getByLabel('信号日期').inputValue(), '2026-09-10', '默认选择最新缓存日期')
+  // 组件库控件的真实菜单、键盘和窄屏布局，避免回退到浏览器原生选择器。
+  assert.equal(await page.locator('select, input[type=date]').count(), 0)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1050 })
+    const historySelect = page.locator('.history-select')
+    await historySelect.scrollIntoViewIfNeeded()
+    const selection = historySelect.locator('.n-base-selection')
+    const arrow = historySelect.locator('.n-base-suffix')
+    const fieldBox = await selection.boundingBox(), arrowBox = await arrow.boundingBox()
+    assert.ok(Math.abs(fieldBox.y + fieldBox.height / 2 - arrowBox.y - arrowBox.height / 2) <= 1, `${width}px：历史扫描箭头垂直居中`)
+    assert.ok(fieldBox.x + fieldBox.width - arrowBox.x - arrowBox.width >= 10, `${width}px：箭头保留右侧间距`)
+    await historySelect.click()
+    await page.getByRole('option', { name: '2026-09-10 · B 2 只', exact: true }).waitFor()
+    assert.equal(await page.getByRole('option', { name: '2026-08-12 · B 1 只', exact: true }).count(), 1, '保留窗口内最早一天')
+    assert.equal(await page.getByRole('option', { name: '2026-08-11 · B 99 只', exact: true }).count(), 0, '隐藏超过 30 天的记录')
+    await page.waitForFunction(() => { const menu = document.querySelector('.n-base-select-menu'); return menu && getComputedStyle(menu).opacity === '1' })
+    const menuBox = await page.locator('.n-base-select-menu').boundingBox()
+    assert.ok(menuBox.x >= 0 && menuBox.x + menuBox.width <= width + 1, `${width}px：下拉菜单不超出屏幕`)
+    assert.ok(menuBox.y >= 0 && menuBox.y + menuBox.height <= 1051, `${width}px：下拉菜单在视口内可见`)
+    await page.screenshot({ path: `results/ui-history-${width}.png` })
+    await page.keyboard.press('Escape')
+    await page.getByRole('option').first().waitFor({ state: 'hidden' })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  }
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  await page.getByLabel('信号日期').click()
+  await page.locator('.n-date-panel').waitFor()
+  await page.waitForFunction(() => { const panel = document.querySelector('.n-date-panel'); return panel && getComputedStyle(panel).opacity === '1' })
+  await page.screenshot({ path: 'results/ui-date-picker.png' })
+  await page.keyboard.press('Escape')
+  console.log('✓ 组件库下拉菜单、箭头居中、边距、Escape 关闭、日历及桌面/手机布局')
+  await page.goto(`${base}signals?date=2026-08-11`)
+  await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
+  assert.equal(await page.getByLabel('信号日期').inputValue(), '2026-09-10', '过期书签回到最近有效日期')
+  await page.waitForURL('**/signals?date=2026-09-10')
+  assert.equal(seen.includes('2026-08-11'), false, '不请求已过期日期')
+  await page.locator('.history-select').click()
+  assert.equal(await page.getByRole('option').filter({ hasText: '2026-08-11' }).count(), 0, '旧日期查询不会重新插入历史列表')
+  await page.keyboard.press('Escape')
+  historyEntries = [{ date: '2026-08-11', found: 99 }]
+  await page.goto(base)
+  await page.getByText('最近 30 天暂无历史扫描记录', { exact: true }).waitFor()
+  await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
+  assert.equal(await page.getByLabel('信号日期').inputValue(), '2026-09-10', '全部过期时默认今天，不自动选择旧记录')
+  assert.equal(await page.locator('.history-select').count(), 0)
+  historyEntries = defaultHistory
+  await page.goto(base)
+  await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
+  console.log('✓ 近 30 天边界、过期书签归一且不请求旧日期、全部过期空态及默认今天')
+
+
   assert.equal(await page.locator('nav a').count(), 2)
   await page.getByRole('button', { name: '登录并扫描', exact: true }).click()
   await page.getByRole('heading', { name: '登录循势', exact: true }).waitFor()
@@ -160,16 +253,20 @@ try {
   console.log('✓ 公开缓存、独立登录和扫描回跳')
 
   await page.getByLabel('信号日期').fill('2026-09-09')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
   assert.ok(seen.includes('2026-09-09'))
   await page.getByLabel('信号日期').fill('2026-09-07')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('heading', { name: '该日期尚未扫描' }).waitFor()
   await page.getByLabel('信号日期').fill('2026-09-04')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('alert').filter({ hasText: '数据源暂不可用' }).waitFor()
-  await page.getByLabel('历史扫描日期').selectOption('2026-09-10')
+  await page.locator('.history-select').click()
+  await page.getByRole('option', { name: '2026-09-10 · B 2 只', exact: true }).click()
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
   console.log('✓ 日期查询、空结果、未扫描、错误提示和历史选择')
 
@@ -184,7 +281,7 @@ try {
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
   assert.equal(posts, 2, '刷新页面只恢复轮询，不重复创建扫描')
   assert.ok(polls >= 2)
-  await page.locator('label').filter({ hasText: /^指定代码$/ }).click()
+  await page.getByText('指定代码', { exact: true }).click()
   await page.getByLabel('股票代码', { exact: false }).fill('bad-code')
   await page.getByRole('button', { name: '开始扫描', exact: true }).click()
   await page.getByRole('alert').filter({ hasText: '六位股票代码' }).waitFor()
@@ -197,6 +294,19 @@ try {
   await page.getByText('已复制 1 个代码').waitFor()
   console.log('✓ 缓存复用、异步扫描刷新恢复、代码校验和复制')
 
+  await page.getByText('全市场扫描', { exact: true }).click()
+  await page.getByLabel('信号日期').fill('2026-09-10')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
+  await page.getByRole('cell', { name: /测试乙.*000001/ }).waitFor()
+  await page.getByLabel('选择 测试甲', { exact: true }).check()
+  await chooseSort('当日涨幅 · 低到高')
+  assert.deepEqual(await rowCodes(), [two.code, one.code])
+  assert.equal(await page.getByLabel('选择 测试甲', { exact: true }).isChecked(), true, '排序后保留已选股票')
+  assert.equal(await page.getByLabel('选择 测试乙', { exact: true }).isChecked(), false)
+  await page.getByLabel('全选未入池股票（最多100只）').check()
+  assert.equal(await page.getByLabel('选择 测试乙', { exact: true }).isChecked(), true)
+  await page.getByLabel('全选未入池股票（最多100只）').uncheck()
   await page.getByLabel('选择 测试甲', { exact: true }).check()
   await page.getByRole('button', { name: '加入观察池 (1)', exact: true }).click()
   await page.getByText('已在观察池', { exact: true }).waitFor()
@@ -328,7 +438,8 @@ try {
   await page.goto(`${base}signals?date=2026-09-10`)
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
   await page.getByLabel('信号日期').fill('2026-09-09')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
   await page.setViewportSize({ width: 1440, height: 1050 })
   await page.screenshot({ path: 'results/empty-desktop.png', fullPage: true })
@@ -350,7 +461,8 @@ try {
   await twoStarted
   assert.equal(sectorRequests.length - beforeCancel, 2, '最多并发两个板块请求')
   await page.getByLabel('信号日期').fill('2026-09-09')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
   releaseSectors()
   sectorGate = null
@@ -370,7 +482,8 @@ try {
   await page.getByRole('button', { name: '重试涨幅查询', exact: true }).click()
   await page.getByText('+56.78%', { exact: true }).waitFor()
   await page.getByLabel('信号日期').fill('2026-09-08')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByText('+2.50%', { exact: true }).first().waitFor()
   assert.equal(performanceRequests.at(-1).date, '2026-09-08')
   assert.equal(await page.getByText('+12.34%', { exact: true }).count(), 0, '日期切换清除旧涨幅')
@@ -388,15 +501,18 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
   await page.screenshot({ path: 'results/returns-mobile.png', fullPage: true })
+  await chooseSort('距今涨幅 · 高到低')
+  assert.deepEqual(await rowCodes(), [one.code, two.code])
+  swappedQuotes = true
   useBackup = false
   const quotesBeforeRefresh = performanceRequests.length
   const automaticRequest = new Promise((resolve) => { onPerformanceRequest = resolve })
-  await page.clock.install()
   await page.clock.fastForward(31000)
   await automaticRequest
   await page.waitForFunction(() => [...document.querySelectorAll('.quote-source')].length === 2 && [...document.querySelectorAll('.quote-source')].every((node) => node.textContent === '东方财富'))
   assert.equal(await page.locator('.quote-source').filter({ hasText: '腾讯备用' }).count(), 0, '后端恢复主源后页面自动更新来源')
   assert.ok(performanceRequests.length > quotesBeforeRefresh, '页面可见时每 30 秒更新涨幅')
+  assert.deepEqual(await rowCodes(), [two.code, one.code], '报价更新后保留排序选项并自动重新排序')
 
   const beforePerformanceCancel = performanceRequests.length
   performanceGate = new Promise((resolve) => { releasePerformance = resolve })
@@ -404,7 +520,8 @@ try {
   await page.reload()
   await requested
   await page.getByLabel('信号日期').fill('2026-09-09')
-  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByLabel('信号日期').press('Tab')
+  await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
   await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
   releasePerformance()
   performanceGate = null

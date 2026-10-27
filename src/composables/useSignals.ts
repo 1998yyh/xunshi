@@ -2,7 +2,7 @@ import { computed, onScopeDispose, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { stockApi } from '../lib/api'
 import { ApiError } from '../lib/http'
-import { chinaToday, parseCodes, validDate } from '../lib/domain'
+import { chinaToday, isRecentScanDate, parseCodes } from '../lib/domain'
 import { session } from '../lib/session'
 import type { HistoryDate, ScanRun, Signals, Stock } from '../types'
 
@@ -10,7 +10,7 @@ export function useSignals() {
   const route = useRoute()
   const router = useRouter()
   const today = chinaToday()
-  const date = shallowRef(validDate(String(route.query.date)) ? String(route.query.date) : today)
+  const date = shallowRef(isRecentScanDate(String(route.query.date), today) ? String(route.query.date) : today)
   const mode = shallowRef<'market' | 'codes'>('market')
   const codesText = shallowRef('')
   const history = shallowRef<HistoryDate[]>([])
@@ -34,11 +34,15 @@ export function useSignals() {
     return { seq: revision, signal: current.signal }
   }
   async function loadHistory() {
-    try { history.value = await stockApi.history(historyController.signal); historyError.value = '' }
+    try {
+      const entries = await stockApi.history(historyController.signal)
+      history.value = entries.filter((item) => isRecentScanDate(item.date, today))
+      historyError.value = ''
+    }
     catch { if (!historyController.signal.aborted) historyError.value = '历史日期暂时无法读取，可直接选择日期查询' }
   }
   async function loadDate(value: string) {
-    if (!validDate(value)) { error.value = '请选择今天或之前的有效日期'; return }
+    if (!isRecentScanDate(value, today)) { error.value = '请选择最近 30 天内的有效日期（含今天）'; return }
     date.value = value
     const { seq, signal } = begin()
     try { const data = await stockApi.results(value, signal); if (seq === revision) result.value = data }
@@ -78,7 +82,7 @@ export function useSignals() {
   async function start(refresh = false) {
     if (loading.value || scanning.value) return
     if (!session.user) { await router.push({ path: '/login', query: { redirect: route.fullPath } }); return }
-    if (!validDate(date.value)) { error.value = '请选择今天或之前的有效日期'; return }
+    if (!isRecentScanDate(date.value, today)) { error.value = '请选择最近 30 天内的有效日期（含今天）'; return }
     let codes: string[] | undefined
     try { if (mode.value === 'codes') codes = parseCodes(codesText.value) }
     catch (e) { error.value = (e as Error).message; return }
@@ -111,15 +115,19 @@ export function useSignals() {
   }
   // 查询日期与 URL 双向同步，使刷新、分享和浏览器前进后退保持同一日期。
   watch(() => route.query.date, (value) => {
-    if (typeof value === 'string' && validDate(value) && value !== date.value) void loadDate(value)
+    if (typeof value !== 'string') return
+    if (!isRecentScanDate(value, today)) { void selectDate(history.value[0]?.date ?? today); return }
+    if (value !== date.value) void loadDate(value)
   })
   void (async () => {
     const initialRevision = revision
     await loadHistory()
     if (historyController.signal.aborted || initialRevision !== revision) return
     if (typeof route.query.run === 'string') { await resume(route.query.run); return }
-    if (!route.query.date && history.value[0]) date.value = history.value[0].date
+    const recentDate = typeof route.query.date === 'string' && isRecentScanDate(route.query.date, today)
+    if (!recentDate) date.value = history.value[0]?.date ?? today
     await loadDate(date.value)
+    if (route.query.date && !recentDate) updateUrl()
   })()
   onScopeDispose(() => { revision++; current?.abort(); historyController.abort() })
   return { today, date, mode, codesText, history, historyError, result, run, loading, scanning, unscanned, error, notices, selected, copyMessage, rows, selectDate, start, copy, loadHistory }

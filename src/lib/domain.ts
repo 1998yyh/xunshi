@@ -9,6 +9,13 @@ export function validDate(value: string, today = chinaToday()): boolean {
   const date = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value && value <= today
 }
+/** 历史列表按上海日期保留含今天在内的最近 30 个自然日。 */
+export function isRecentScanDate(value: string, today = chinaToday()): boolean {
+  if (!validDate(value, today)) return false
+  const earliest = new Date(`${today}T00:00:00Z`)
+  earliest.setUTCDate(earliest.getUTCDate() - 29)
+  return value >= earliest.toISOString().slice(0, 10)
+}
 export function parseCodes(text: string): string[] {
   const codes = [...new Set(text.split(/[\s,，;；]+/).filter(Boolean).map((s) => s.toLowerCase()))]
   if (!codes.length) throw new Error('请输入至少一个股票代码')
