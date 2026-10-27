@@ -4,6 +4,7 @@ import { useSignals } from '../../composables/useSignals'
 import { useWatchlist } from '../../composables/useWatchlist'
 import { useAuth } from '../../composables/useAuth'
 import { useStockSectors } from '../../composables/useStockSectors'
+import { useStockPerformance } from '../../composables/useStockPerformance'
 import { formatTime } from '../../lib/domain'
 import PageHeader from '../ui/PageHeader.vue'
 import EmptyState from '../ui/EmptyState.vue'
@@ -13,6 +14,7 @@ const auth = useAuth()
 const pool = useWatchlist()
 const { today, date, mode, codesText, history, historyError, result, run, loading, scanning, unscanned, error, notices, selected, copyMessage, rows, selectDate, start, copy, loadHistory } = useSignals()
 const { sectors, failed: sectorsFailed, retry: retrySectors } = useStockSectors(rows)
+const { performance, failed: performanceFailed, retry: retryPerformance } = useStockPerformance(rows, date)
 const chosen = computed(() => rows.value.filter((item) => selected.value.includes(item.code)))
 const progress = computed(() => run.value?.total ? Math.min(100, Math.round(run.value.checked / run.value.total * 100)) : 0)
 watch(pool.codes, (codes) => { selected.value = selected.value.filter((code) => !codes.has(code)) })
@@ -127,6 +129,19 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
             重试板块查询
           </button>
         </p>
+        <p
+          v-if="rows.length"
+          class="sector-source"
+        >
+          当日涨幅对应 {{ date }}；距今涨幅从该日收盘起算 · 腾讯行情 / 前复权 · 每 30 秒更新
+          <button
+            v-if="performanceFailed"
+            class="text-button"
+            @click="retryPerformance"
+          >
+            重试涨幅查询
+          </button>
+        </p>
       </div><div class="result-actions">
         <button
           v-if="rows.length"
@@ -163,6 +178,7 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
       v-model="selected"
       :rows="rows"
       :sectors="sectors"
+      :performance="performance"
       :authenticated="!!auth.state.user"
       :pooled="pool.codes.value"
       :busy="pool.state.busy"

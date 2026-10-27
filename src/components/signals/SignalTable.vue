@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Stock, StockSectors } from '../../types'
+import type { Stock, StockSectors, StockPerformance } from '../../types'
 import StockSectorCells from './StockSectorCells.vue'
+import StockReturnCells from './StockReturnCells.vue'
 const selected = defineModel<string[]>({ required: true })
-const props = defineProps<{ rows: readonly Stock[]; sectors: ReadonlyMap<string, StockSectors>; authenticated: boolean; pooled: Set<string>; busy: boolean }>()
+const props = defineProps<{ rows: readonly Stock[]; sectors: ReadonlyMap<string, StockSectors>; performance: ReadonlyMap<string, StockPerformance>; authenticated: boolean; pooled: Set<string>; busy: boolean }>()
 const available = computed(() => props.rows.filter((item) => !props.pooled.has(item.code)))
 const all = computed(() => available.value.length > 0 && available.value.slice(0, 100).every((item) => selected.value.includes(item.code)))
 function toggle(code: string) { selected.value = selected.value.includes(code) ? selected.value.filter((v) => v !== code) : [...selected.value, code] }
@@ -25,7 +26,11 @@ function toggleAll() { selected.value = all.value ? [] : available.value.slice(0
               :disabled="!available.length || busy"
               @change="toggleAll"
             >
-          </th><th>股票</th><th>行业板块</th><th>概念板块</th><th>观察状态</th>
+          </th><th>股票</th><th title="所选筛选日期相对前一交易日的涨跌幅">
+            当日涨幅
+          </th><th title="所选筛选日收盘至最新报价的涨跌幅，前复权口径">
+            距今涨幅
+          </th><th>行业板块</th><th>概念板块</th><th>观察状态</th>
         </tr>
       </thead><tbody>
         <tr
@@ -44,6 +49,7 @@ function toggleAll() { selected.value = all.value ? [] : available.value.slice(0
               @change="toggle(item.code)"
             >
           </td><td><strong class="stock-name">{{ item.name || '未命名股票' }}</strong><span class="stock-code">{{ item.code }}</span></td>
+          <StockReturnCells :value="performance.get(item.code)" />
           <StockSectorCells
             :value="sectors.get(item.code)"
             :name="item.name || item.code"

@@ -1,6 +1,7 @@
 import { request } from './http'
-import type { AddResponse, HistoryDate, ScanResponse, ScanRun, Signals, Stock, StockSectors, WatchItem, WatchlistCheckResponse } from '../types'
+import type { AddResponse, HistoryDate, ScanResponse, ScanRun, Signals, Stock, StockSectors, StockPerformance, WatchItem, WatchlistCheckResponse } from '../types'
 export const stockApi = {
+  performance: (date: string, codes: string[], signal?: AbortSignal) => request<{ items: StockPerformance[] }>(`/stock-signals/performance?date=${encodeURIComponent(date)}&codes=${encodeURIComponent(codes.join(','))}`, { signal }),
   sectors: (codes: string[], signal?: AbortSignal) => request<{ items: StockSectors[] }>(`/stock-signals/sectors?codes=${encodeURIComponent(codes.join(','))}`, { signal }),
   history: (signal?: AbortSignal) => request<HistoryDate[]>('/stock-signals/dates', { signal }),
   results: (date: string, signal?: AbortSignal) => request<Signals>(`/stock-signals?date=${encodeURIComponent(date)}`, { signal }),

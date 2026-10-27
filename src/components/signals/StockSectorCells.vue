@@ -56,14 +56,14 @@ const placeholder = computed(() => !props.value ? '加载中…' : props.value.s
 
 <style scoped>
 .industry-cell {
-  width: 25%;
+  width: 20%;
   white-space: normal;
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
 
 .concept-cell {
-  width: 40%;
+  width: 28%;
   white-space: normal;
 }
 

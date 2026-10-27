@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { chromium } from 'playwright'
 const server = await createServer({ mode: process.env.TEST_DEPLOYMENT ? 'production' : 'test', server: { host: '127.0.0.1', port: 0, strictPort: true } })
-let browser, page, releaseRemove, releaseSectors
+let browser, page, releaseRemove, releaseSectors, releasePerformance
 try {
   await server.listen()
   const base = server.resolvedUrls.local[0]
@@ -20,6 +20,9 @@ try {
   let denyRemove = false, removeGate = null
   let failWatchlistCheck = false
   let denySectors = false
+  let denyPerformance = false, performanceGate = null, pendingBaseline = false
+  const performanceRequests = []
+  let onPerformanceRequest = () => {}
   let manyRows = null
   const sectorRequests = []
   let onSectorRequest = () => {}
@@ -46,6 +49,20 @@ try {
     if (expire && !req.headers().authorization?.startsWith('Bearer renewed-')) return reply({ message: 'access expired' }, 401)
     if (path === '/auth/profile') return reply({ id: user, username: user, email: `${user}@test.invalid`, role: 'user' })
     if (path === '/stock-signals/dates') return reply([{ date: '2026-09-10', found: 2 }, { date: '2026-09-09', found: 0 }])
+    if (path === '/stock-signals/performance') {
+      const codes = url.searchParams.get('codes').split(','), date = url.searchParams.get('date')
+      performanceRequests.push({ codes, date })
+      onPerformanceRequest()
+      const denied = denyPerformance, pending = pendingBaseline
+      if (performanceGate) await performanceGate
+      if (denied) return reply({ message: '行情来源暂不可用' }, 503)
+      return reply({ items: codes.map((code, index) => ({ code, date,
+        dayPercent: date === '2026-09-08' ? 2.5 : index % 2 === 0 ? 12.34 : 0,
+        sincePercent: pending ? null : index % 2 === 0 ? 56.78 : -3.21,
+        dayReason: null, sinceReason: pending ? '基准日未收盘' : null,
+        quoteAsOf: '2026-10-27T02:00:00Z', source: 'tencent', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
+      })) })
+    }
     if (path === '/stock-signals/sectors') {
       const codes = url.searchParams.get('codes').split(',')
       sectorRequests.push(codes)
@@ -98,7 +115,12 @@ try {
   await mkdir('results', { recursive: true })
   await page.goto(base)
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
-  assert.deepEqual(await page.getByRole('columnheader').allTextContents(), ['股票', '行业板块', '概念板块', '观察状态'])
+  assert.deepEqual((await page.getByRole('columnheader').allTextContents()).map((text) => text.trim()), ['股票', '当日涨幅', '距今涨幅', '行业板块', '概念板块', '观察状态'])
+  await page.getByRole('cell', { name: '+12.34%', exact: true }).waitFor()
+  await page.getByRole('cell', { name: '0.00%', exact: true }).waitFor()
+  await page.getByText('-3.21%', { exact: true }).waitFor()
+  await page.getByText('+56.78%', { exact: true }).waitFor()
+  assert.equal(performanceRequests[0].date, '2026-09-10', '当日涨幅请求的是筛选日期')
   assert.ok(await page.getByRole('cell', { name: '加载中…', exact: true }).count() > 0, '板块加载不阻塞股票结果')
   releaseSectors()
   sectorGate = null
@@ -333,10 +355,60 @@ try {
   assert.equal(sectorRequests.length - beforeCancel, 2, '日期切换后不再发送旧批次')
   assert.equal(await page.locator('.signals-scroll').count(), 0, '迟到板块响应不能恢复旧股票')
   console.log('✓ 板块分批、并发限制与切换日期取消旧请求')
+
+  manyRows = null
+  denyPerformance = true
+  await page.goto(`${base}signals?date=2026-09-10`)
+  await page.getByRole('button', { name: '重试涨幅查询', exact: true }).waitFor()
+  assert.equal(await page.locator('.return-cell').filter({ hasText: '行情暂不可用' }).count(), 4)
+  assert.equal(await page.getByRole('cell', { name: /测试甲.*600519/ }).count(), 1)
+  denyPerformance = false
+  await page.getByRole('button', { name: '重试涨幅查询', exact: true }).click()
+  await page.getByText('+56.78%', { exact: true }).waitFor()
+  await page.getByLabel('信号日期').fill('2026-09-08')
+  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByText('+2.50%', { exact: true }).first().waitFor()
+  assert.equal(performanceRequests.at(-1).date, '2026-09-08')
+  assert.equal(await page.getByText('+12.34%', { exact: true }).count(), 0, '日期切换清除旧涨幅')
+
+  pendingBaseline = true
+  await page.reload()
+  await page.getByText('待收盘', { exact: true }).first().waitFor()
+  assert.equal(await page.getByText('+56.78%', { exact: true }).count(), 0, '未收盘时不展示假累计')
+  pendingBaseline = false
+
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  await page.goto(`${base}signals?date=2026-09-10`)
+  await page.getByText('+56.78%', { exact: true }).waitFor()
+  await page.screenshot({ path: 'results/returns-desktop.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  await page.screenshot({ path: 'results/returns-mobile.png', fullPage: true })
+  const quotesBeforeRefresh = performanceRequests.length
+  const automaticRequest = new Promise((resolve) => { onPerformanceRequest = resolve })
+  await page.clock.install()
+  await page.clock.fastForward(31000)
+  await automaticRequest
+  assert.ok(performanceRequests.length > quotesBeforeRefresh, '页面可见时每 30 秒更新涨幅')
+
+  const beforePerformanceCancel = performanceRequests.length
+  performanceGate = new Promise((resolve) => { releasePerformance = resolve })
+  const requested = new Promise((resolve) => { onPerformanceRequest = resolve })
+  await page.reload()
+  await requested
+  await page.getByLabel('信号日期').fill('2026-09-09')
+  await page.getByLabel('信号日期').dispatchEvent('change')
+  await page.getByRole('heading', { name: '当日没有命中 B 信号' }).waitFor()
+  releasePerformance()
+  performanceGate = null
+  await page.clock.fastForward(31000)
+  assert.equal(performanceRequests.length - beforePerformanceCancel, 1, '切换到空结果后取消旧报价和刷新计时器')
+  assert.equal(await page.locator('.return-cell').count(), 0)
+  console.log('✓ 筛选日涨幅、累计正负与零值、失败重试、待收盘、桌面/手机布局、自动刷新及取消')
   assert.deepEqual(errors, [])
   console.log('✓ 扫描失败、空态、窄屏筛选页与运行时检查')
 } catch (error) {
   await mkdir('results', { recursive: true })
   if (page) { await page.screenshot({ path: 'results/failure.png', fullPage: true }); console.error(await page.locator('main').innerText()) }
   throw error
-} finally { releaseRemove?.(); releaseSectors?.(); await browser?.close(); await server.close() }
+} finally { releaseRemove?.(); releaseSectors?.(); releasePerformance?.(); await browser?.close(); await server.close() }
