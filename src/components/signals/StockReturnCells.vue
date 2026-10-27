@@ -4,6 +4,7 @@ import type { StockPerformance } from '../../types'
 const props = defineProps<{ value?: StockPerformance }>()
 function percent(value: number) { return `${value > 0 ? '+' : ''}${(Object.is(value, -0) ? 0 : value).toFixed(2)}%` }
 function tone(value: number | null | undefined) { return value === null || value === undefined || value === 0 ? 'muted' : value > 0 ? 'return-up' : 'return-down' }
+const sourceLabel = computed(() => props.value && (props.value.dayPercent !== null || props.value.sincePercent !== null) ? props.value.source === 'tencent' ? '腾讯备用' : '东方财富' : '')
 const quoteTime = computed(() => props.value?.quoteAsOf ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(props.value.quoteAsOf)) : '')
 </script>
 
@@ -34,6 +35,11 @@ const quoteTime = computed(() => props.value?.quoteAsOf ? new Intl.DateTimeForma
       class="return-missing"
     >{{ value?.sinceReason === '基准日未收盘' ? '待收盘' : value ? value.sinceReason || '暂不可用' : '加载中…' }}</span>
     <small
+      v-if="sourceLabel"
+      class="quote-source"
+      :title="value?.source === 'tencent' ? '东方财富数据不完整，当前整只股票使用腾讯前复权行情' : '当前使用东方财富前复权行情'"
+    >{{ sourceLabel }}</small>
+    <small
       v-if="quoteTime"
       class="quote-time"
     >截至 {{ quoteTime }}</small>
@@ -48,7 +54,7 @@ const quoteTime = computed(() => props.value?.quoteAsOf ? new Intl.DateTimeForma
 .return-up { color: var(--danger); }
 .return-down { color: var(--accent); }
 .return-missing { color: var(--muted); font-size: 10px; }
-.quote-time { display: block; color: var(--muted); font-size: 9px; margin-top: 5px; }
+.quote-source, .quote-time { display: block; color: var(--muted); font-size: 9px; margin-top: 5px; }
 @media (max-width: 800px) {
   .return-cell { min-width: 0; }
 }

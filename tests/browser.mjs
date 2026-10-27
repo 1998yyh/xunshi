@@ -20,7 +20,7 @@ try {
   let denyRemove = false, removeGate = null
   let failWatchlistCheck = false
   let denySectors = false
-  let denyPerformance = false, performanceGate = null, pendingBaseline = false
+  let denyPerformance = false, performanceGate = null, pendingBaseline = false, useBackup = true
   const performanceRequests = []
   let onPerformanceRequest = () => {}
   let manyRows = null
@@ -60,7 +60,7 @@ try {
         dayPercent: date === '2026-09-08' ? 2.5 : index % 2 === 0 ? 12.34 : 0,
         sincePercent: pending ? null : index % 2 === 0 ? 56.78 : -3.21,
         dayReason: null, sinceReason: pending ? '基准日未收盘' : null,
-        quoteAsOf: '2026-10-27T02:00:00Z', source: 'eastmoney', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
+        quoteAsOf: '2026-10-27T02:00:00Z', source: useBackup && index % 2 === 1 ? 'tencent' : 'eastmoney', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
       })) })
     }
     if (path === '/stock-signals/sectors') {
@@ -121,8 +121,9 @@ try {
   await page.getByText('-3.21%', { exact: true }).waitFor()
   await page.getByText('+56.78%', { exact: true }).waitFor()
   assert.equal(performanceRequests[0].date, '2026-09-10', '当日涨幅请求的是筛选日期')
-  await page.getByText(/东方财富行情 \/ 前复权/).waitFor()
-  assert.equal(await page.getByText(/腾讯行情/).count(), 0, '涨幅与板块统一为东方财富，页面不再标注腾讯')
+  await page.getByText(/东方财富优先，腾讯备用 \/ 前复权/).waitFor()
+  await page.locator('.quote-source').filter({ hasText: '腾讯备用' }).waitFor()
+  assert.deepEqual(await page.locator('.quote-source').allTextContents(), ['东方财富', '腾讯备用'], '逐只标出实际来源')
   assert.ok(await page.getByRole('cell', { name: '加载中…', exact: true }).count() > 0, '板块加载不阻塞股票结果')
   releaseSectors()
   sectorGate = null
@@ -364,6 +365,7 @@ try {
   await page.getByRole('button', { name: '重试涨幅查询', exact: true }).waitFor()
   assert.equal(await page.locator('.return-cell').filter({ hasText: '行情暂不可用' }).count(), 4)
   assert.equal(await page.getByRole('cell', { name: /测试甲.*600519/ }).count(), 1)
+  assert.equal(await page.locator('.quote-source').count(), 0, '缺失数据不标成成功行情来源')
   denyPerformance = false
   await page.getByRole('button', { name: '重试涨幅查询', exact: true }).click()
   await page.getByText('+56.78%', { exact: true }).waitFor()
@@ -386,11 +388,14 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
   await page.screenshot({ path: 'results/returns-mobile.png', fullPage: true })
+  useBackup = false
   const quotesBeforeRefresh = performanceRequests.length
   const automaticRequest = new Promise((resolve) => { onPerformanceRequest = resolve })
   await page.clock.install()
   await page.clock.fastForward(31000)
   await automaticRequest
+  await page.waitForFunction(() => [...document.querySelectorAll('.quote-source')].length === 2 && [...document.querySelectorAll('.quote-source')].every((node) => node.textContent === '东方财富'))
+  assert.equal(await page.locator('.quote-source').filter({ hasText: '腾讯备用' }).count(), 0, '后端恢复主源后页面自动更新来源')
   assert.ok(performanceRequests.length > quotesBeforeRefresh, '页面可见时每 30 秒更新涨幅')
 
   const beforePerformanceCancel = performanceRequests.length

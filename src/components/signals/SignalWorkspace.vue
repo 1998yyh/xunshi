@@ -133,7 +133,7 @@ async function add() { if (result.value && chosen.value.length) await pool.add(c
           v-if="rows.length"
           class="sector-source"
         >
-          当日涨幅对应 {{ date }}；距今涨幅从该日收盘起算 · 东方财富行情 / 前复权 · 每 30 秒更新
+          当日涨幅对应 {{ date }}；距今涨幅从该日收盘起算 · 东方财富优先，腾讯备用 / 前复权 · 每 30 秒更新
           <button
             v-if="performanceFailed"
             class="text-button"
