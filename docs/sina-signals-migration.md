@@ -47,15 +47,15 @@
 
 ## 筛选日涨幅与距今涨幅（2026-10-27）
 
-筛选表增加“当日涨幅”和“距今涨幅”。当日指所选筛选日期：历史日按该日前复权收盘价相对前一交易日前复权收盘价计算；距今按最新报价相对筛选日前复权收盘价计算。不是按点击查询时的今天，也不是按实际加入观察池的日期。
+筛选表增加“当日涨幅”和“距今涨幅”。当日指所选筛选日期：历史日直接读取东方财富该日的涨跌幅字段；距今按最新报价相对筛选日前复权收盘价计算。不是按点击查询时的今天，也不是按实际加入观察池的日期。
 
-独立公开接口 `GET /stock-signals/performance` 接收 `date` 和逗号分隔的 `codes`。返回 `items`，包含 `code`、`date`、`dayPercent`、`sincePercent`、`dayReason`、`sinceReason`、`quoteAsOf`、`source=tencent`、`adjustment=qfq` 和 `fetchedAt`。百分比直接以 12.34 表示 12.34%，缺失为 null，真实零为 0。
+独立公开接口 `GET /stock-signals/performance` 接收 `date` 和逗号分隔的 `codes`。返回 `items`，包含 `code`、`date`、`dayPercent`、`sincePercent`、`dayReason`、`sinceReason`、`quoteAsOf`、`source=eastmoney`、`adjustment=qfq` 和 `fetchedAt`。百分比直接以 12.34 表示 12.34%，缺失为 null，真实零为 0。
 
 今天盘中筛选时，当日涨幅采用当前报价的当日涨跌幅，距今显示“待收盘”；到上海 15:00 且行情报价也已到当天收盘后才计算累计。所选日无行情不借用邻近交易日，没有基准或有效最新报价不填零。报价时间标在距今涨幅下方，停牌/非交易日保留原实际报价时间。
 
 前端十只一批、最多两个并发任务，股票列表和勾选不等待行情；页面可见时每轮完成后 30 秒刷新，隐藏时跳过刷新。日期切换、重试和卸载均取消旧请求与定时器。后端全局四路并发、成功/部分有效缓存 30 秒、全缺失缓存 5 秒。
 
-历史计算受源站前复权价格精度影响，可能与行情软件官方涨跌幅有小幅差异。后端读取筛选日期前 45 天起、最多 640 条日线，缺少目标或前一交易日/复权序列时明确缺失。实现记录见 `../tuanzi-server-stock-sectors/docs/plans/2026-10-27-signal-price-returns-impl.md`。前后端分支均为 `feature/signal-price-returns`，无配置、依赖和数据库迁移；先发布后端，再发布前端，本次尚未部署。
+当日历史涨幅使用东方财富日线 `f59`，当前日使用实时报价 `f170`；距今涨幅仍以筛选日前复权收盘为基准。后端读取筛选日期前 45 天起、最多 1200 条前复权日线，缺少目标或有效最新报价时明确缺失。报价和历史数据都来自东方财富，不自动回退到腾讯；一类数据失败不阻断另一类已取得的数据。实现记录见 `../tuanzi-server-stock-sectors/docs/plans/2026-10-27-signal-price-returns-impl.md`。前后端当前分支为 `feature/unify-market-source`，包含前序涨幅功能。统一数据源记录见后端 `docs/plans/2026-10-27-unify-market-source-impl.md`。无配置、依赖和数据库迁移；先发布后端，再发布前端，本次尚未部署。
 
 ## 验证范围
 

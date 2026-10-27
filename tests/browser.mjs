@@ -60,7 +60,7 @@ try {
         dayPercent: date === '2026-09-08' ? 2.5 : index % 2 === 0 ? 12.34 : 0,
         sincePercent: pending ? null : index % 2 === 0 ? 56.78 : -3.21,
         dayReason: null, sinceReason: pending ? '基准日未收盘' : null,
-        quoteAsOf: '2026-10-27T02:00:00Z', source: 'tencent', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
+        quoteAsOf: '2026-10-27T02:00:00Z', source: 'eastmoney', adjustment: 'qfq', fetchedAt: '2026-10-27T02:00:01Z',
       })) })
     }
     if (path === '/stock-signals/sectors') {
@@ -121,6 +121,8 @@ try {
   await page.getByText('-3.21%', { exact: true }).waitFor()
   await page.getByText('+56.78%', { exact: true }).waitFor()
   assert.equal(performanceRequests[0].date, '2026-09-10', '当日涨幅请求的是筛选日期')
+  await page.getByText(/东方财富行情 \/ 前复权/).waitFor()
+  assert.equal(await page.getByText(/腾讯行情/).count(), 0, '涨幅与板块统一为东方财富，页面不再标注腾讯')
   assert.ok(await page.getByRole('cell', { name: '加载中…', exact: true }).count() > 0, '板块加载不阻塞股票结果')
   releaseSectors()
   sectorGate = null

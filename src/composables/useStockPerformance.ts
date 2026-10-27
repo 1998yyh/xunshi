@@ -34,7 +34,7 @@ export function useStockPerformance(rows: Ref<readonly Stock[]>, date: Ref<strin
           for (const code of batch) next.set(code, items.find((item) => item.code === code && item.date === referenceDate) ?? {
             code, date: referenceDate, dayPercent: null, sincePercent: null,
             dayReason: '行情暂不可用', sinceReason: '行情暂不可用', quoteAsOf: null,
-            source: 'tencent', adjustment: 'qfq', fetchedAt: new Date().toISOString(),
+            source: 'eastmoney', adjustment: 'qfq', fetchedAt: new Date().toISOString(),
           })
           performance.value = next
         }
