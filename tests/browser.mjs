@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { createServer } from 'vite'
+import net from 'node:net'
+const probe = net.createServer(); await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve)); const testPort = probe.address().port; await new Promise(resolve => probe.close(resolve))
 import { chromium } from 'playwright'
-const server = await createServer({ mode: process.env.TEST_DEPLOYMENT ? 'production' : 'test', server: { host: '127.0.0.1', port: 0, strictPort: true } })
+const server = await createServer({ mode: process.env.TEST_DEPLOYMENT ? 'production' : 'test', server: { host: '127.0.0.1', port: testPort, strictPort: true } })
 let browser, page, releaseRemove, releaseSectors, releasePerformance
 try {
   await server.listen()
@@ -18,7 +20,7 @@ try {
   const one = { code: '600519', market: 'sh', name: '测试甲' }
   const two = { code: '000001', market: 'sz', name: '测试乙' }
   const pools = { alice: [], bob: [] }
-  let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false
+  let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false, authenticatedUser = null
   let denyRemove = false, removeGate = null
   let failWatchlistCheck = false
   let denySectors = false
@@ -40,8 +42,13 @@ try {
   const results = (date) => ({ date, items: date === '2026-09-09' ? [] : manyRows ?? [one, two], found: date === '2026-09-09' ? 0 : manyRows?.length ?? 2, checked: manyRows?.length ?? 2, total: manyRows?.length ?? 2, failedCodes: [], scannedAt: '2026-09-10T07:00:00Z' })
   await page.route('**/api/**', async (route) => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname.replace(/^\/(?:xunshi\/)?api/, ''), method = req.method()
-    const user = req.headers().authorization?.includes('bob') ? 'bob' : 'alice'
+    const user = authenticatedUser ?? 'alice'
     const reply = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) })
+    if (path === '/auth/session') {
+      if (method === 'DELETE') { authenticatedUser = null; return route.fulfill({ status: 204 }) }
+      if (!authenticatedUser || expire) return reply({ message: '会话已过期' }, 401)
+      return reply({ user: { id: user, username: user, email: `${user}@test.invalid`, role: 'user' }, apps: ['xunshi'], csrfToken: 'fixture-csrf', expiresAt: '2030-01-01T00:00:00Z' })
+    }
     if (path === '/auth/login') { const name = req.postDataJSON().login; return reply({ accessToken: `access-${name}`, refreshToken: `refresh-${name}` }) }
     if (path === '/auth/refresh') {
       refreshes++
@@ -111,10 +118,11 @@ try {
     }
     throw new Error(`未定义的测试请求: ${method} ${path}`)
   })
+  await page.route('**/login?**', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<meta charset="utf-8"><h1>统一登录</h1>' }))
   const login = async (name) => {
-    await page.getByLabel('邮箱或用户名').fill(name)
-    await page.getByLabel('密码', { exact: true }).fill('integration-only')
-    await page.getByRole('button', { name: '登录工作台', exact: true }).click()
+    authenticatedUser = name
+    const target = new URL(page.url()).searchParams.get('returnTo') || '/xunshi/signals'
+    await page.goto(new URL(target, base).href)
   }
   const rowCodes = () => page.locator('.signals-scroll .stock-code').allTextContents()
   const chooseSort = async (label) => {
@@ -245,7 +253,7 @@ try {
 
   assert.equal(await page.locator('nav a').count(), 2)
   await page.getByRole('button', { name: '登录并扫描', exact: true }).click()
-  await page.getByRole('heading', { name: '登录循势', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '统一登录', exact: true }).waitFor()
   assert.equal(posts, 0)
   await login('alice')
   await page.getByRole('cell', { name: /测试甲.*600519/ }).waitFor()
@@ -423,14 +431,10 @@ try {
   assert.equal(await page.getByRole('cell', { name: /测试甲.*600519/ }).count(), 0)
   expire = true
   await page.reload()
-  await page.getByRole('heading', { name: '你的观察池还是空的' }).waitFor()
-  assert.equal(refreshes, 1)
-  denyRefresh = true
-  await page.evaluate(() => { const tokens = JSON.parse(localStorage.getItem('xunshi.session.v1')); tokens.accessToken = 'expired-bob'; localStorage.setItem('xunshi.session.v1', JSON.stringify(tokens)) })
-  await page.reload()
   await page.getByRole('heading', { name: '登录，开始你的长期观察' }).waitFor()
+  assert.equal(refreshes, 0)
   assert.equal(await page.evaluate(() => localStorage.getItem('xunshi.session.v1')), null)
-  console.log('✓ 账户切换隔离、令牌刷新与过期清理')
+  console.log('✓ 账户切换隔离与 Cookie 会话过期清理，无 JWT 刷新')
 
   expire = false
   await page.goto(`${base}signals?date=2026-09-10&run=failed-run`)
@@ -533,6 +537,6 @@ try {
   console.log('✓ 扫描失败、空态、窄屏筛选页与运行时检查')
 } catch (error) {
   await mkdir('results', { recursive: true })
-  if (page) { await page.screenshot({ path: 'results/failure.png', fullPage: true }); console.error(await page.locator('main').innerText()) }
+  if (page) { await page.screenshot({ path: 'results/failure.png', fullPage: true }); console.error(await page.locator('body').innerText()) }
   throw error
 } finally { releaseRemove?.(); releaseSectors?.(); releasePerformance?.(); await browser?.close(); await server.close() }
