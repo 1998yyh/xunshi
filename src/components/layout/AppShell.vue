@@ -3,10 +3,12 @@ import { NButton } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../../composables/useAuth'
 import UiIcon from '../ui/UiIcon.vue'
+import { shallowRef } from 'vue'
 const auth = useAuth()
 const router = useRouter()
 const route = useRoute()
-function logout() { auth.logout(); void router.push('/signals') }
+const logoutError = shallowRef('')
+async function logout() { try { await auth.logout(); await router.push('/signals') } catch (error) { logoutError.value = error instanceof Error ? error.message : '退出失败，请重试' } }
 </script>
 <template>
   <div class="app-shell">
@@ -32,6 +34,12 @@ function logout() { auth.logout(); void router.push('/signals') }
         <span class="status-dot" />关注信号，保持节奏<p>从筛选到跟踪，让每一次观察都有记录。</p>
       </div>
       <div class="account-box">
+        <p
+          v-if="logoutError || auth.state.error"
+          role="alert"
+        >
+          {{ logoutError || auth.state.error }}
+        </p>
         <template v-if="auth.state.user">
           <span class="avatar">{{ auth.state.user.username.slice(0, 1).toUpperCase() }}</span><div class="account-name">
             <strong>{{ auth.state.user.username }}</strong><small>个人工作台</small>

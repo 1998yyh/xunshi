@@ -80,3 +80,8 @@ bash deploy/deploy.sh
 Nginx 首次配置见 `deploy/nginx.conf.example` 和 `deploy/nginx.locations.conf`。后续发版只切换循势版本入口，不改主站静态文件。回滚可在 Actions 页面针对旧 ref 手动重跑，或将 `/var/www/xunshi` 原子切回保留的旧版本目录。
 
 开发背景与接口记录见 [docs/sina-signals-migration.md](docs/sina-signals-migration.md)。
+
+
+### 统一登录（待后端配套发布）
+
+本项目改用共享 Cookie 会话，`/xunshi/login` 跳转本站 `/login` 并保留目标业务页面。公开查询继续匿名可用；扫描和观察池由同一后端校验会话，私人数据保留原 userId 隔离。403 不退出，退出/换号按代际清空观察池。先完成后端会话与 HTTPS，再发布前端；本项目不再持久保存或刷新 JWT。源码中的共享客户端须与其他前端同步更新。
