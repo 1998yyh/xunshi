@@ -61,7 +61,7 @@ pnpm test:browser
 
 ## 部署
 
-线上入口为 <http://43.140.214.49/xunshi/>，GitHub 仓库为 <https://github.com/1998yyh/xunshi>。
+线上入口为 <https://43.140.214.49/xunshi/>，GitHub 仓库为 <https://github.com/1998yyh/xunshi>。
 
 部署沿用主站的 Node 22 + pnpm 10.32.0 构建、SSH + rsync 上传和 Nginx 静态服务。`.env.production` 固定 `VITE_BASE_PATH=/xunshi/` 与 `VITE_API_URL=/xunshi/api`；路由与资源使用相同基路径，独立 API 反代保留后端 `/api` 前缀。
 
