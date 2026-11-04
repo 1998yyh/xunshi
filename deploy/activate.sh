@@ -31,15 +31,15 @@ mv -Tf "$next_link" "$site_path"
 trap rollback ERR
 ready=false
 for attempt in $(seq 1 10); do
-  if curl --max-time 10 -fsS http://127.0.0.1/xunshi/signals | grep -q '循势'; then
+  if curl -L --max-redirs 2 --resolve 43.140.214.49:443:127.0.0.1 --max-time 10 -fsS http://127.0.0.1/xunshi/signals | grep -q '循势'; then
     ready=true
     break
   fi
   sleep 1
 done
 [ "$ready" = true ]
-curl --max-time 15 -fsS http://127.0.0.1/xunshi/api/stock-signals/dates | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin),list)'
-missing_status="$(curl --max-time 10 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/xunshi/assets/__missing__.js)"
+curl -L --max-redirs 2 --resolve 43.140.214.49:443:127.0.0.1 --max-time 15 -fsS http://127.0.0.1/xunshi/api/stock-signals/dates | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin),list)'
+missing_status="$(curl -L --max-redirs 2 --resolve 43.140.214.49:443:127.0.0.1 --max-time 10 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/xunshi/assets/__missing__.js)"
 [ "$missing_status" = 404 ]
 trap - ERR
 printf '循势发布成功：%s\n前一版本：%s\n' "$release_dir" "${previous:-无}"
