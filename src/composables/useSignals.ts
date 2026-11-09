@@ -6,7 +6,7 @@ import { chinaToday, isRecentScanDate, parseCodes } from '../lib/domain'
 import { session } from '../lib/session'
 import type { HistoryDate, ScanRun, Signals, Stock } from '../types'
 
-export function useSignals() {
+export function useSignals(onScanCompleted?: () => void) {
   const route = useRoute()
   const router = useRouter()
   const today = chinaToday()
@@ -69,7 +69,7 @@ export function useSignals() {
       if (data.run.status === 'failed') throw new Error('扫描任务失败，请重新扫描')
       if (data.run.status === 'done') {
         applyRun(data.run, data.items ?? []); run.value = null; scanning.value = false
-        updateUrl(); void loadHistory(); return
+        updateUrl(); void loadHistory(); onScanCompleted?.(); return
       }
       // 轮询等待也响应取消，离开页面只停止前端跟踪，服务端任务继续运行。
       await new Promise<void>((resolve, reject) => {
@@ -95,6 +95,7 @@ export function useSignals() {
         result.value = { date: value.date, items: value.items, found: value.items.length, checked: value.cachedCount + value.fetchedCount, total: value.requested, failedCodes: value.failed, scannedAt: new Date().toISOString() }
         if (value.invalid.length) notices.value = [`已跳过无效代码：${value.invalid.join('、')}`]
         updateUrl()
+        if (value.fetchedCount > 0) onScanCompleted?.()
       } else if (data.cached) { await loadDate(date.value); void loadHistory() }
       else if (data.run) { updateUrl({ run: data.run.id }); await follow(data.run.id, seq, signal) }
       else throw new Error('扫描响应缺少结果，请重试')

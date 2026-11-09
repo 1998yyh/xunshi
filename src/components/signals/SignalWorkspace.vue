@@ -14,7 +14,7 @@ import { NButton, NProgress } from 'naive-ui'
 import SignalTable from './SignalTable.vue'
 const auth = useAuth()
 const pool = useWatchlist()
-const { today, date, mode, codesText, history, historyError, result, run, loading, scanning, unscanned, error, notices, selected, copyMessage, rows, selectDate, start, copy, loadHistory } = useSignals()
+const { today, date, mode, codesText, history, historyError, result, run, loading, scanning, unscanned, error, notices, selected, copyMessage, rows, selectDate, start, copy, loadHistory } = useSignals(() => { if (!pool.state.busy) void pool.load() })
 const { sectors, failed: sectorsFailed, retry: retrySectors } = useStockSectors(rows)
 const { performance, failed: performanceFailed, retry: retryPerformance } = useStockPerformance(rows, date)
 const chosen = computed(() => rows.value.filter((item) => selected.value.includes(item.code)))

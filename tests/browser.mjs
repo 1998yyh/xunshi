@@ -23,6 +23,10 @@ try {
   let posts = 0, polls = 0, refreshes = 0, expire = false, denyRefresh = false, authenticatedUser = null
   let denyRemove = false, removeGate = null
   let failWatchlistCheck = false
+  let scanUpdatesWatchlist = false, watchlistReads = 0, watchlistChecks = 0
+  const applyScannedSignal = (user) => {
+    if (scanUpdatesWatchlist) pools[user] = pools[user].map((item) => item.code === one.code ? { ...item, status: 'triggered', triggeredSignalDate: '2026-09-10' } : item)
+  }
   let denySectors = false
   let denyPerformance = false, performanceGate = null, pendingBaseline = false, useBackup = true, swappedQuotes = false
   const performanceRequests = []
@@ -93,18 +97,22 @@ try {
     if (path === '/stock-signals/scans' && method === 'POST') {
       posts++
       const data = req.postDataJSON()
-      if (data.codes) return reply({ result: { date: data.date, items: [one], requested: 1, cachedCount: 1, fetchedCount: 0, failed: [], invalid: [] } })
+      if (data.codes) {
+        if (data.refresh) applyScannedSignal(user)
+        return reply({ result: { date: data.date, items: [one], requested: 1, cachedCount: data.refresh ? 0 : 1, fetchedCount: data.refresh ? 1 : 0, failed: [], invalid: [] } })
+      }
       if (!data.refresh) return reply({ cached: true, run: run('done') })
       polls = 0; return reply({ cached: false, run: run('running') })
     }
-    if (path === '/stock-signals/scans/test-run') { polls++; return reply({ run: run(polls >= 2 ? 'done' : 'running'), ...(polls >= 2 ? { items: [one, two] } : {}) }) }
+    if (path === '/stock-signals/scans/test-run') { polls++; if (polls >= 2) applyScannedSignal(user); return reply({ run: run(polls >= 2 ? 'done' : 'running'), ...(polls >= 2 ? { items: [one, two] } : {}) }) }
     if (path === '/stock-signals/scans/failed-run') return reply({ run: run('failed') })
-    if (path === '/stock-watchlist' && method === 'GET') return reply({ items: pools[user] })
+    if (path === '/stock-watchlist' && method === 'GET') { watchlistReads++; return reply({ items: pools[user] }) }
     if (path === '/stock-watchlist' && method === 'POST') {
       const added = req.postDataJSON().items.map((item) => ({ ...item, id: item.code, status: 'watching', triggeredSignalDate: null }))
       pools[user] = added; return reply({ items: added, added: added.map((item) => item.code), duplicated: [], invalid: [], overflow: [] })
     }
     if (path === '/stock-watchlist/check') {
+      watchlistChecks++
       const watching = pools[user].filter((item) => item.status === 'watching')
       if (failWatchlistCheck) return reply({ checked: 0, triggered: 0, failed: watching.map((item) => `${item.market.toUpperCase()}${item.code}`), items: pools[user] })
       const triggered = watching.filter((item) => [one.code, '600396'].includes(item.code)).length
@@ -417,6 +425,37 @@ try {
   assert.equal(await page.getByRole('cell', { name: '2026-09-15', exact: true }).count(), 1)
   await page.screenshot({ path: 'results/watchlist-history-desktop.png', fullPage: true })
   console.log('✓ 历史检查失败提示、旧日期 S 展示及新增数量与已触发数量区分')
+
+  const resetScannedWatch = () => { pools.alice = [{ ...one, id: 'scan-watch', entrySignalDate: '2026-09-09', status: 'watching', triggeredSignalDate: null }] }
+  resetScannedWatch()
+  await page.locator('nav').getByRole('link', { name: '信号筛选', exact: true }).click()
+  await page.getByText('0 只已触发 S 信号', { exact: true }).waitFor()
+  const beforeCachedRead = watchlistReads, beforeScanCheck = watchlistChecks
+  await page.getByRole('button', { name: '开始扫描', exact: true }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '开始扫描' && !button.disabled))
+  assert.equal(watchlistReads, beforeCachedRead, '缓存命中不重复加载观察池')
+  scanUpdatesWatchlist = true
+  await page.getByRole('button', { name: '忽略缓存，重新扫描', exact: true }).click()
+  await page.getByText('服务端扫描中', { exact: true }).waitFor()
+  await page.reload()
+  await page.getByText('1 只已触发 S 信号', { exact: true }).waitFor()
+  assert.ok(watchlistReads > beforeCachedRead, '恢复扫描并完成后同步服务端观察池状态')
+  resetScannedWatch()
+  await page.reload()
+  await page.getByText('0 只已触发 S 信号', { exact: true }).waitFor()
+  await page.getByText('指定代码', { exact: true }).click()
+  await page.getByLabel('股票代码', { exact: false }).fill(one.code)
+  const beforeCodeRead = watchlistReads
+  await page.getByRole('button', { name: '开始扫描', exact: true }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '开始扫描' && !button.disabled))
+  assert.equal(watchlistReads, beforeCodeRead, '指定代码全命中缓存时不重查观察池')
+  await page.getByRole('button', { name: '忽略缓存，重新扫描', exact: true }).click()
+  await page.getByText('1 只已触发 S 信号', { exact: true }).waitFor()
+  assert.equal(watchlistChecks, beforeScanCheck, '前端只同步状态，不重复发起新浪历史检查')
+  await page.screenshot({ path: 'results/scan-watchlist-sync.png', fullPage: true })
+  scanUpdatesWatchlist = false
+  await page.locator('nav').getByRole('link', { name: '我的观察池', exact: true }).click()
+  console.log('✓ 强制扫描完成和刷新恢复后同步 S 状态，缓存不重复查询，无额外历史取数')
 
   // 在退出前保留一条私人记录，切换账号后不得显示前一账户内容。
   pools.alice = [{ ...one, id: 'private-alice', entrySignalDate: '2026-09-10', status: 'watching', triggeredSignalDate: null }]
